@@ -25,6 +25,7 @@ class AndroidComposeConventionPlugin : Plugin<Project> {
                 add("implementation", "androidx.compose.ui:ui")
                 add("implementation", "androidx.compose.ui:ui-tooling-preview")
                 add("implementation", "androidx.compose.material3:material3")
+                add("implementation", "androidx.compose.material:material-icons-extended")
                 add("debugImplementation", "androidx.compose.ui:ui-tooling")
             }
         }
