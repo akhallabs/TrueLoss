@@ -8,6 +8,7 @@ android { namespace = "tm.trueloss.feature.settings.ui" }
 dependencies {
     implementation(project(":feature:settings:domain"))
     implementation(project(":core:common"))
+    implementation(project(":core:domain"))
     implementation(project(":core:ui"))
     implementation(project(":core:designsystem"))
     implementation(project(":core:navigation"))

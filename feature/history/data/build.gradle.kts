@@ -7,6 +7,7 @@ android { namespace = "tm.trueloss.feature.history.data" }
 dependencies {
     implementation(project(":feature:history:domain"))
     implementation(project(":core:common"))
+    implementation(project(":core:domain"))
     implementation(project(":core:data"))
     implementation(project(":core:network"))
     implementation(project(":core:database"))

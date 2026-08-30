@@ -11,6 +11,7 @@ class FeatureUiConventionPlugin : Plugin<Project> {
             pluginManager.apply("tm.trueloss.android.hilt")
             dependencies {
                 add("implementation", project(":core:common"))
+                add("implementation", project(":core:domain"))
                 add("implementation", project(":core:ui"))
                 add("implementation", project(":core:designsystem"))
                 add("implementation", project(":core:navigation"))
