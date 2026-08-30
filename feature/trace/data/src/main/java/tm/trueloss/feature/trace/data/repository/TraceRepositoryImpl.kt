@@ -19,23 +19,20 @@ class TraceRepositoryImpl @Inject constructor() : TraceRepository {
     override fun trace(config: TraceConfig): Flow<List<TraceHop>> = flow {
         val target = config.target.trim()
         val targetIp = try { InetAddress.getByName(target).hostAddress ?: target } catch (_: Exception) { target }
-        while (true) {
-            val results = mutableListOf<TraceHop>()
-            val maxHops = config.maxHops.coerceIn(1, 30)
-            for (ttl in 1..maxHops) {
-                val hop = probeOnce(target, ttl)
-                val enriched = if (hop != null) enrichHop(hop) else TraceHop(hop = ttl, ip = null, hostname = null, rttList = emptyList(), lossPercent = 100f)
-                results.add(enriched)
-                emit(results.toList())
-                if (enriched.ip == targetIp || enriched.ip == target) break
-                if (results.size >= 2 && results.takeLast(2).all { it.lossPercent == 100f } && ttl > 12) break
-                delay(250)
-            }
-            if (results.isEmpty()) {
-                val direct = pingLoss(target, 3)
-                emit(listOf(TraceHop(hop = 1, ip = targetIp, hostname = target, rttList = direct.second, lossPercent = direct.first)))
-            }
-            delay(1200)
+        val results = mutableListOf<TraceHop>()
+        val maxHops = config.maxHops.coerceIn(1, 30)
+        for (ttl in 1..maxHops) {
+            val hop = probeOnce(target, ttl)
+            val enriched = if (hop != null) enrichHop(hop) else TraceHop(hop = ttl, ip = null, hostname = null, rttList = emptyList(), lossPercent = 100f)
+            results.add(enriched)
+            emit(results.toList())
+            if (enriched.ip == targetIp || enriched.ip == target) break
+            if (results.size >= 2 && results.takeLast(2).all { it.lossPercent == 100f } && ttl > 12) break
+            delay(250)
+        }
+        if (results.isEmpty()) {
+            val direct = pingLoss(target, 3)
+            emit(listOf(TraceHop(hop = 1, ip = targetIp, hostname = target, rttList = direct.second, lossPercent = direct.first)))
         }
     }.flowOn(Dispatchers.IO)
 
