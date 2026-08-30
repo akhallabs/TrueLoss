@@ -1,7 +1,6 @@
 plugins {
     `kotlin-dsl`
 }
-group = "tm.trueloss.buildlogic"
 repositories {
     google()
     mavenCentral()
