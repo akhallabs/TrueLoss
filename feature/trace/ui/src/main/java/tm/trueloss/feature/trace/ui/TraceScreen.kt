@@ -21,8 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
@@ -71,7 +71,7 @@ fun TraceScreen(vm: TraceViewModel = hiltViewModel()) {
             CenterAlignedTopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                        Icon(Icons.Default.TravelExplore, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Default.Explore, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("TrueLoss", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     }
@@ -108,11 +108,11 @@ private fun InputCard(state: TraceUiState, vm: TraceViewModel) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = state.ipVersion == IpVersion.IPv4, onClick = { vm.onEvent(TraceEvent.IpVersionChanged(IpVersion.IPv4)) }, label = { Text("IPv4") })
                 FilterChip(selected = state.ipVersion == IpVersion.IPv6, onClick = { vm.onEvent(TraceEvent.IpVersionChanged(IpVersion.IPv6)) }, label = { Text("IPv6") })
-                AssistChip(onClick = {}, label = { Text(state.protocol.name + " • " + state.ipVersion.name) }, leadingIcon = { Icon(Icons.Default.TravelExplore, null, Modifier.size(16.dp)) }, colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer))
+                AssistChip(onClick = {}, label = { Text(state.protocol.name + " • " + state.ipVersion.name) }, leadingIcon = { Icon(Icons.Default.Explore, null, Modifier.size(16.dp)) }, colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 if (state.isRunning) {
-                    FilledTonalButton(onClick = { vm.onEvent(TraceEvent.Stop) }, modifier = Modifier.weight(1f).height(52.dp), shape = MaterialTheme.shapes.large) { Icon(Icons.Default.Stop, null); Spacer(Modifier.width(8.dp)); Text("Durdur") }
+                    FilledTonalButton(onClick = { vm.onEvent(TraceEvent.Stop) }, modifier = Modifier.weight(1f).height(52.dp), shape = MaterialTheme.shapes.large) { Icon(Icons.Default.Pause, null); Spacer(Modifier.width(8.dp)); Text("Durdur") }
                     LinearProgressIndicator(modifier = Modifier.align(Alignment.CenterVertically).weight(0.5f))
                 } else {
                     androidx.compose.material3.Button(onClick = { vm.onEvent(TraceEvent.Start) }, enabled = state.isTargetValid, modifier = Modifier.weight(1f).height(52.dp), shape = MaterialTheme.shapes.large) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Loss Kontrol Et", style = MaterialTheme.typography.labelLarge) }
@@ -203,7 +203,7 @@ private fun HopRow(index: Int, ip: String?, hostname: String?, rtts: List<Float>
 private fun EmptyState() {
     Card(shape = MaterialTheme.shapes.extraLarge, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.padding(24.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Default.TravelExplore, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.Explore, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
             Text("Loss kontrolüne hazır", style = MaterialTheme.typography.titleMedium)
             Text("Domain veya IP yaz ve kontrol et. Gerçek ICMP/UDP/TCP traceroute ile her hop için loss ve RTT ölçülür.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
