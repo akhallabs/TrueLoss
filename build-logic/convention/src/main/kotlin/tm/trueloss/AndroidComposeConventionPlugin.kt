@@ -9,7 +9,7 @@ import org.gradle.kotlin.dsl.dependencies
 class AndroidComposeConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
-            // compose compiler enabled via buildFeatures.compose = true (AGP 8.7 + Kotlin 2.0 auto-configures)
+            pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
             val isApp = pluginManager.hasPlugin("com.android.application")
             if (isApp) {
                 extensions.configure<ApplicationExtension> {
