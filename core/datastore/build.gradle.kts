@@ -3,5 +3,5 @@ plugins {
     id("tm.trueloss.android.library")
     id("tm.trueloss.android.hilt")
 }
-android { namespace = "tm.true.loss.core.datastore" }
+android { namespace = "tm.trueloss.core.datastore" }
 dependencies { implementation(libs.androidx.datastore.preferences) }

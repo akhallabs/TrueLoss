@@ -3,7 +3,7 @@ plugins {
     id("tm.trueloss.android.library")
     id("tm.trueloss.android.hilt")
 }
-android { namespace = "tm.true.loss.feature.trace.data" }
+android { namespace = "tm.trueloss.feature.trace.data" }
 dependencies {
     implementation(project(":feature:trace:domain"))
     implementation(project(":core:common"))

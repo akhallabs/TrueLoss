@@ -3,5 +3,5 @@ plugins {
     id("tm.trueloss.android.library")
     id("tm.trueloss.android.room")
 }
-android { namespace = "tm.true.loss.core.database" }
+android { namespace = "tm.trueloss.core.database" }
 dependencies { implementation(project(":core:domain")) }

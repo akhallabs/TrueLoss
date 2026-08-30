@@ -6,7 +6,7 @@ plugins {
     id("tm.trueloss.android.compose")
 }
 android {
-    namespace = "tm.true.loss"
+    namespace = "tm.trueloss"
     compileSdk = 35
     defaultConfig {
         applicationId = "tm.true.loss"

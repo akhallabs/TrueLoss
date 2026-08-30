@@ -3,7 +3,7 @@ plugins {
     id("tm.trueloss.android.library")
     id("tm.trueloss.android.hilt")
 }
-android { namespace = "tm.true.loss.feature.settings.data" }
+android { namespace = "tm.trueloss.feature.settings.data" }
 dependencies {
     implementation(project(":feature:settings:domain"))
     implementation(project(":core:common"))

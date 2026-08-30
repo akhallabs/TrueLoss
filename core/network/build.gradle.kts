@@ -3,7 +3,7 @@ plugins {
     id("tm.trueloss.android.library")
     id("tm.trueloss.android.hilt")
 }
-android { namespace = "tm.true.loss.core.network" }
+android { namespace = "tm.trueloss.core.network" }
 dependencies {
     implementation(project(":core:common"))
     implementation(libs.retrofit)

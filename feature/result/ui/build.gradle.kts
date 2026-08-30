@@ -4,7 +4,7 @@ plugins {
     id("tm.trueloss.android.compose")
     id("tm.trueloss.android.hilt")
 }
-android { namespace = "tm.true.loss.feature.result.ui" }
+android { namespace = "tm.trueloss.feature.result.ui" }
 dependencies {
     implementation(project(":feature:result:domain"))
     implementation(project(":core:common"))
