@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     id("tm.trueloss.android.compose")
 }
@@ -16,14 +17,6 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("armeabi-v7a") }
-    }
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("armeabi-v7a")
-            isUniversalApk = false
-        }
     }
     buildFeatures { compose = true; buildConfig = true }
     buildTypes {
@@ -62,6 +55,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
     implementation(libs.coil.compose)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
