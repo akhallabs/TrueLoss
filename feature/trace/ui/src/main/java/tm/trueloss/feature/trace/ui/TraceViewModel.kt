@@ -5,10 +5,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import tm.trueloss.core.ui.base.BaseViewModel
+import tm.trueloss.feature.history.domain.model.HistoryItem
+import tm.trueloss.feature.history.domain.repository.HistoryRepository
 import tm.trueloss.feature.trace.domain.usecase.StartTraceUseCase
+import java.util.UUID
 import javax.inject.Inject
 @HiltViewModel
-class TraceViewModel @Inject constructor(private val startTrace: StartTraceUseCase) : BaseViewModel<TraceUiState, TraceEvent, TraceEffect>(TraceUiState()) {
+class TraceViewModel @Inject constructor(private val startTrace: StartTraceUseCase, private val historyRepo: HistoryRepository) : BaseViewModel<TraceUiState, TraceEvent, TraceEffect>(TraceUiState()) {
     private var job: Job? = null
     override fun onEvent(event: TraceEvent) {
         when (event) {
@@ -16,7 +19,7 @@ class TraceViewModel @Inject constructor(private val startTrace: StartTraceUseCa
             is TraceEvent.ProtocolChanged -> setState { copy(protocol = event.p) }
             is TraceEvent.IpVersionChanged -> setState { copy(ipVersion = event.v) }
             is TraceEvent.Start -> start()
-            is TraceEvent.Stop -> { job?.cancel(); setState { copy(isRunning = false) } }
+            is TraceEvent.Stop -> stopAndSave()
             is TraceEvent.Clear -> { job?.cancel(); setState { TraceUiState(target = uiState.value.target, protocol = uiState.value.protocol, ipVersion = uiState.value.ipVersion) } }
         }
     }
@@ -33,9 +36,18 @@ class TraceViewModel @Inject constructor(private val startTrace: StartTraceUseCa
                     setState { copy(hops = hops, avgLoss = avg, maxLoss = max, completedHops = hops.size) }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 setState { copy(error = e.message ?: "Hata", isRunning = false) }
-            } finally {
-                setState { copy(isRunning = false) }
+            }
+        }
+    }
+    private fun stopAndSave() {
+        val s = uiState.value
+        job?.cancel()
+        setState { copy(isRunning = false) }
+        if (s.hops.isNotEmpty() && s.target.isNotBlank()) {
+            viewModelScope.launch {
+                historyRepo.save(HistoryItem(id = UUID.randomUUID().toString(), target = s.target, date = System.currentTimeMillis(), hopCount = s.hops.size, avgLoss = s.avgLoss))
             }
         }
     }

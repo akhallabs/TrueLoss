@@ -10,4 +10,5 @@ class HistoryRepositoryImpl @Inject constructor(private val dao: HistoryDao) : H
     override fun getHistory(): Flow<List<HistoryItem>> = dao.observeAll().map { list -> list.map { HistoryItem(id = it.id, target = it.target, date = it.date, hopCount = it.hopCount, avgLoss = it.avgLoss) } }
     override suspend fun delete(id: String) = dao.delete(id)
     override suspend fun clear() = dao.clear()
+    override suspend fun save(item: HistoryItem) { dao.insert(HistoryEntity(id = item.id, target = item.target, date = item.date, hopCount = item.hopCount, avgLoss = item.avgLoss, protocol = "")) }
 }

@@ -10,67 +10,52 @@ import tm.trueloss.feature.trace.domain.model.TraceHop
 import tm.trueloss.feature.trace.domain.repository.TraceRepository
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.HttpURLConnection
 import java.net.InetAddress
+import java.net.URL
 import javax.inject.Inject
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 class TraceRepositoryImpl @Inject constructor() : TraceRepository {
     override fun trace(config: TraceConfig): Flow<List<TraceHop>> = flow {
         val target = config.target.trim()
-        val ip = try { InetAddress.getByName(target).hostAddress ?: target } catch (_: Exception) { target }
-        val results = mutableListOf<TraceHop>()
-        val maxHops = config.maxHops.coerceIn(1, 30)
-        for (ttl in 1..maxHops) {
-            val hop = probeWithTtl(target, ttl, config)
-            if (hop != null) {
-                val enriched = enrichHop(hop, config)
+        val targetIp = try { InetAddress.getByName(target).hostAddress ?: target } catch (_: Exception) { target }
+        while (true) {
+            val results = mutableListOf<TraceHop>()
+            val maxHops = config.maxHops.coerceIn(1, 30)
+            for (ttl in 1..maxHops) {
+                val hop = probeOnce(target, ttl)
+                val enriched = if (hop != null) enrichHop(hop) else TraceHop(hop = ttl, ip = null, hostname = null, rttList = emptyList(), lossPercent = 100f)
                 results.add(enriched)
                 emit(results.toList())
-                if (hop.ip == ip || hop.ip == target) break
-                if (results.size >= 1 && ttl > 5 && results.takeLast(2).all { it.lossPercent == 100f }) {
-                    if (ttl > 12) break
-                }
-            } else {
-                val timeoutHop = TraceHop(hop = ttl, ip = null, hostname = null, rttList = emptyList(), lossPercent = 100f)
-                results.add(timeoutHop)
-                emit(results.toList())
+                if (enriched.ip == targetIp || enriched.ip == target) break
+                if (results.size >= 2 && results.takeLast(2).all { it.lossPercent == 100f } && ttl > 12) break
+                delay(250)
             }
-            delay(300)
-            if (results.size >= maxHops) break
-        }
-        if (results.isEmpty()) {
-            val direct = pingLoss(target, 4)
-            val hop = TraceHop(hop = 1, ip = ip, hostname = target, rttList = direct.second, lossPercent = direct.first)
-            emit(listOf(enrichHop(hop, config)))
+            if (results.isEmpty()) {
+                val direct = pingLoss(target, 3)
+                emit(listOf(TraceHop(hop = 1, ip = targetIp, hostname = target, rttList = direct.second, lossPercent = direct.first)))
+            }
+            delay(1200)
         }
     }.flowOn(Dispatchers.IO)
 
-    private suspend fun probeWithTtl(target: String, ttl: Int, config: TraceConfig): TraceHop? = withContext(Dispatchers.IO) {
+    private suspend fun probeOnce(target: String, ttl: Int): TraceHop? = withContext(Dispatchers.IO) {
         try {
-            val pingCount = 3
-            val cmd = when (config.protocol.name) {
-                "TCP" -> arrayOf("ping", "-c", pingCount.toString(), "-W", "1", "-t", ttl.toString(), target)
-                "UDP" -> arrayOf("ping", "-c", pingCount.toString(), "-W", "1", "-t", ttl.toString(), target)
-                else -> arrayOf("ping", "-c", pingCount.toString(), "-W", "1", "-t", ttl.toString(), target)
-            }
-            val proc = Runtime.getRuntime().exec(cmd)
+            val proc = Runtime.getRuntime().exec(arrayOf("ping", "-c", "3", "-W", "1", "-t", ttl.toString(), target))
             val reader = BufferedReader(InputStreamReader(proc.inputStream))
             var hopIp: String? = null
             val rtts = mutableListOf<Float>()
-            var transmitted = pingCount
+            var transmitted = 3
             var received = 0
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val l = line!!
-                if (l.contains("From ")) {
-                    val m = Regex("""From\s+([0-9.]+)""").find(l)
+                if (l.contains("From ") || l.contains("from ")) {
+                    val m = Regex("""[Ff]rom\s+([0-9]{1,3}(?:\.[0-9]{1,3}){3})""").find(l)
                     if (m != null) hopIp = m.groupValues[1]
-                    val m2 = Regex("""from\s+([0-9.]+)""").find(l)
-                    if (m2 != null && hopIp == null) hopIp = m2.groupValues[1]
                 }
                 if (l.contains("bytes from")) {
-                    val m = Regex("""from\s+([0-9.]+)""").find(l)
+                    val m = Regex("""bytes from\s+([0-9.]+)""").find(l)
                     if (m != null) hopIp = m.groupValues[1]
                     val t = Regex("""time=([0-9.]+)""").find(l)
                     if (t != null) { rtts.add(t.groupValues[1].toFloat()); received++ }
@@ -79,20 +64,16 @@ class TraceRepositoryImpl @Inject constructor() : TraceRepository {
                     val m = Regex("""(\d+)% packet loss""").find(l)
                     if (m != null) {
                         val loss = m.groupValues[1].toFloat()
-                        transmitted = pingCount
-                        received = ((100 - loss) / 100 * pingCount).toInt()
+                        received = ((100 - loss) / 100 * 3).toInt()
                     }
-                }
-                if (l.contains("rtt min")) {
-                    val m = Regex("""rtt min/avg/max[^=]*=\s*([0-9.]+)/([0-9.]+)/([0-9.]+)""").find(l)
-                    if (m != null && rtts.isEmpty()) { rtts.add(m.groupValues[2].toFloat()) }
                 }
             }
             proc.waitFor()
             reader.close()
             if (hopIp == null && rtts.isEmpty() && received == 0) return@withContext null
-            val loss = if (transmitted > 0) ((transmitted - received).toFloat() / transmitted * 100f).coerceIn(0f, 100f) else if (rtts.isEmpty()) 100f else 0f
-            TraceHop(hop = ttl, ip = hopIp, hostname = null, rttList = rtts.ifEmpty { if (loss == 100f) emptyList() else listOf(10f) }, lossPercent = loss)
+            val loss = if (rtts.isEmpty() && received == 0) 100f else ((transmitted - received).toFloat() / transmitted * 100f).coerceIn(0f, 100f)
+            val finalRtts = if (rtts.isNotEmpty()) rtts else if (loss < 100f) listOf(8f) else emptyList()
+            TraceHop(hop = ttl, ip = hopIp, hostname = null, rttList = finalRtts, lossPercent = loss)
         } catch (_: Exception) { null }
     }
 
@@ -105,24 +86,16 @@ class TraceRepositoryImpl @Inject constructor() : TraceRepository {
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val l = line!!
-                val t = Regex("""time=([0-9.]+)""").find(l)
-                if (t != null) rtts.add(t.groupValues[1].toFloat())
-                val m = Regex("""(\d+)% packet loss""").find(l)
-                if (m != null) loss = m.groupValues[1].toFloat()
+                Regex("""time=([0-9.]+)""").find(l)?.let { rtts.add(it.groupValues[1].toFloat()) }
+                Regex("""(\d+)% packet loss""").find(l)?.let { loss = it.groupValues[1].toFloat() }
             }
             proc.waitFor()
             reader.close()
-            if (rtts.isEmpty() && loss == 100f) {
-                val start = System.currentTimeMillis()
-                val reachable = try { InetAddress.getByName(target).isReachable(2000) } catch (_: Exception) { false }
-                val rtt = (System.currentTimeMillis() - start).toFloat().coerceAtLeast(1f)
-                if (reachable) return@withContext 0f to listOf(rtt)
-            }
             loss to rtts
         } catch (_: Exception) { 100f to emptyList() }
     }
 
-    private suspend fun enrichHop(hop: TraceHop, config: TraceConfig): TraceHop {
+    private suspend fun enrichHop(hop: TraceHop): TraceHop {
         val ip = hop.ip ?: return hop
         val geo = resolveGeo(ip)
         val asn = resolveAsn(ip)
@@ -131,32 +104,19 @@ class TraceRepositoryImpl @Inject constructor() : TraceRepository {
 
     override suspend fun resolveAsn(ip: String): String? = withContext(Dispatchers.IO) {
         try {
-            val url = URL("http://ip-api.com/json/$ip?fields=as")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
-            conn.requestMethod = "GET"
-            if (conn.responseCode == 200) {
-                val txt = conn.inputStream.bufferedReader().readText()
-                val obj = JSONObject(txt)
-                obj.optString("as", null)?.takeIf { it.isNotBlank() }
-            } else null
+            val conn = URL("http://ip-api.com/json/$ip?fields=as").openConnection() as HttpURLConnection
+            conn.connectTimeout = 2500; conn.readTimeout = 2500
+            if (conn.responseCode == 200) JSONObject(conn.inputStream.bufferedReader().readText()).optString("as", null)?.takeIf { it.isNotBlank() } else null
         } catch (_: Exception) { null }
     }
 
     override suspend fun resolveGeo(ip: String): Pair<String?, String?> = withContext(Dispatchers.IO) {
         try {
-            val url = URL("http://ip-api.com/json/$ip?fields=country,regionName,city")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
-            conn.requestMethod = "GET"
+            val conn = URL("http://ip-api.com/json/$ip?fields=country,city").openConnection() as HttpURLConnection
+            conn.connectTimeout = 2500; conn.readTimeout = 2500
             if (conn.responseCode == 200) {
-                val txt = conn.inputStream.bufferedReader().readText()
-                val obj = JSONObject(txt)
-                val c = obj.optString("country", null)?.takeIf { it.isNotBlank() }
-                val city = obj.optString("city", null)?.takeIf { it.isNotBlank() } ?: obj.optString("regionName", null)
-                c to city
+                val obj = JSONObject(conn.inputStream.bufferedReader().readText())
+                obj.optString("country", null)?.takeIf { it.isNotBlank() } to obj.optString("city", null)?.takeIf { it.isNotBlank() }
             } else null to null
         } catch (_: Exception) { null to null }
     }
