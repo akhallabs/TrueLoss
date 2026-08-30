@@ -1,0 +1,1 @@
+-keep class tm.true.loss.** { *; }

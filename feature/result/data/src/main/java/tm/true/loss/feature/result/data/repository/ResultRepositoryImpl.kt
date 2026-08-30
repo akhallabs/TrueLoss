@@ -1,0 +1,10 @@
+package tm.true.loss.feature.result.data.repository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import tm.true.loss.core.domain.model.TraceModel
+import tm.true.loss.feature.result.domain.repository.ResultRepository
+import javax.inject.Inject
+class ResultRepositoryImpl @Inject constructor(): ResultRepository {
+    override fun getResult(id: String): Flow<TraceModel?> = flowOf(null)
+    override suspend fun shareAsImage(id: String): ByteArray = ByteArray(0)
+}
