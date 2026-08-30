@@ -8,3 +8,7 @@ local.properties
 *.iml
 .DS_Store
 gradle/wrapper/gradle-wrapper.jar
+
+# original high-res source kept, playstore 512 kept
+# keep mipmap
+
