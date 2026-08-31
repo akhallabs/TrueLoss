@@ -1,4 +1,6 @@
 package tm.trueloss.feature.trace.data.repository
+import android.system.Os
+import android.system.OsConstants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -9,9 +11,14 @@ import tm.trueloss.feature.trace.domain.model.TraceConfig
 import tm.trueloss.feature.trace.domain.model.TraceHop
 import tm.trueloss.feature.trace.domain.repository.TraceRepository
 import java.io.BufferedReader
+import java.io.FileDescriptor
 import java.io.InputStreamReader
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
 import javax.inject.Inject
 import org.json.JSONObject
@@ -22,7 +29,11 @@ class TraceRepositoryImpl @Inject constructor() : TraceRepository {
         val results = mutableListOf<TraceHop>()
         val maxHops = config.maxHops.coerceIn(1, 30)
         for (ttl in 1..maxHops) {
-            val hop = probeOnce(target, ttl)
+            val hop = when (config.protocol.name) {
+                "UDP" -> probeUdp(target, targetIp, ttl, config.timeoutMs)
+                "TCP" -> probeTcp(target, targetIp, ttl, config.timeoutMs)
+                else -> probeIcmp(target, ttl)
+            }
             val enriched = if (hop != null) enrichHop(hop) else TraceHop(hop = ttl, ip = null, hostname = null, rttList = emptyList(), lossPercent = 100f)
             results.add(enriched)
             emit(results.toList())
@@ -36,42 +47,140 @@ class TraceRepositoryImpl @Inject constructor() : TraceRepository {
         }
     }.flowOn(Dispatchers.IO)
 
-    private suspend fun probeOnce(target: String, ttl: Int): TraceHop? = withContext(Dispatchers.IO) {
+    private suspend fun probeIcmp(target: String, ttl: Int): TraceHop? = withContext(Dispatchers.IO) {
         try {
             val proc = Runtime.getRuntime().exec(arrayOf("ping", "-c", "3", "-W", "1", "-t", ttl.toString(), target))
             val reader = BufferedReader(InputStreamReader(proc.inputStream))
             var hopIp: String? = null
             val rtts = mutableListOf<Float>()
-            var transmitted = 3
             var received = 0
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val l = line!!
                 if (l.contains("From ") || l.contains("from ")) {
-                    val m = Regex("""[Ff]rom\s+([0-9]{1,3}(?:\.[0-9]{1,3}){3})""").find(l)
-                    if (m != null) hopIp = m.groupValues[1]
+                    Regex("""[Ff]rom\s+([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-fA-F0-9:]+)""").find(l)?.let { hopIp = it.groupValues[1] }
                 }
                 if (l.contains("bytes from")) {
-                    val m = Regex("""bytes from\s+([0-9.]+)""").find(l)
-                    if (m != null) hopIp = m.groupValues[1]
-                    val t = Regex("""time=([0-9.]+)""").find(l)
-                    if (t != null) { rtts.add(t.groupValues[1].toFloat()); received++ }
+                    Regex("""bytes from\s+([0-9.:a-fA-F]+)""").find(l)?.let { hopIp = it.groupValues[1] }
+                    Regex("""time=([0-9.]+)""").find(l)?.let { rtts.add(it.groupValues[1].toFloat()); received++ }
                 }
                 if (l.contains("packet loss")) {
-                    val m = Regex("""(\d+)% packet loss""").find(l)
-                    if (m != null) {
-                        val loss = m.groupValues[1].toFloat()
-                        received = ((100 - loss) / 100 * 3).toInt()
-                    }
+                    Regex("""(\d+)% packet loss""").find(l)?.let { received = ((100 - it.groupValues[1].toFloat()) / 100 * 3).toInt() }
                 }
             }
             proc.waitFor()
             reader.close()
             if (hopIp == null && rtts.isEmpty() && received == 0) return@withContext null
-            val loss = if (rtts.isEmpty() && received == 0) 100f else ((transmitted - received).toFloat() / transmitted * 100f).coerceIn(0f, 100f)
-            val finalRtts = if (rtts.isNotEmpty()) rtts else if (loss < 100f) listOf(8f) else emptyList()
-            TraceHop(hop = ttl, ip = hopIp, hostname = null, rttList = finalRtts, lossPercent = loss)
+            val loss = if (rtts.isEmpty() && received == 0) 100f else ((3 - received).toFloat() / 3 * 100f).coerceIn(0f, 100f)
+            TraceHop(hop = ttl, ip = hopIp, hostname = null, rttList = if (rtts.isNotEmpty()) rtts else if (loss < 100f) listOf(8f) else emptyList(), lossPercent = loss)
         } catch (_: Exception) { null }
+    }
+
+    private suspend fun probeUdp(target: String, targetIp: String, ttl: Int, timeoutMs: Int): TraceHop? = withContext(Dispatchers.IO) {
+        var fd: FileDescriptor? = null
+        var icmpFd: FileDescriptor? = null
+        try {
+            val dstAddr = InetAddress.getByName(targetIp)
+            val isV6 = dstAddr is java.net.Inet6Address
+            fd = Os.socket(if (isV6) OsConstants.AF_INET6 else OsConstants.AF_INET, OsConstants.SOCK_DGRAM, OsConstants.IPPROTO_UDP)
+            if (isV6) Os.setsockoptInt(fd, OsConstants.IPPROTO_IPV6, OsConstants.IPV6_UNICAST_HOPS, ttl)
+            else Os.setsockoptInt(fd, OsConstants.IPPROTO_IP, OsConstants.IP_TTL, ttl)
+            Os.setsockoptInt(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, timeoutMs)
+            icmpFd = try { Os.socket(if (isV6) OsConstants.AF_INET6 else OsConstants.AF_INET, OsConstants.SOCK_DGRAM, OsConstants.IPPROTO_ICMP) } catch (_: Exception) { null }
+            if (icmpFd != null) {
+                try { Os.setsockoptInt(icmpFd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, timeoutMs) } catch (_: Exception) {}
+            }
+            val start = System.currentTimeMillis()
+            val port = 33434 + ttl
+            val sent = try {
+                val data = ByteArray(32)
+                if (isV6) {
+                    val addr = java.net.InetSocketAddress(dstAddr, port)
+                    Os.sendto(fd, data, 0, data.size, 0, addr.address, port)
+                } else {
+                    Os.sendto(fd, ByteArray(32), 0, 32, 0, dstAddr, port)
+                }
+                true
+            } catch (_: Exception) { false }
+            if (!sent) {
+                try { DatagramSocket().use { s -> s.soTimeout = timeoutMs; s.send(DatagramPacket(ByteArray(32), 32, dstAddr, port)) } } catch (_: Exception) {}
+            }
+            var hopIp: String? = null
+            var rtt: Float? = null
+            if (icmpFd != null) {
+                try {
+                    val buf = ByteArray(512)
+                    val addr = InetSocketAddress(0)
+                    val len = Os.recvfrom(icmpFd, buf, 0, buf.size, 0, addr)
+                    if (len > 0) {
+                        hopIp = addr.address?.hostAddress
+                        rtt = (System.currentTimeMillis() - start).toFloat()
+                    }
+                } catch (_: Exception) {}
+            }
+            if (hopIp != null) {
+                TraceHop(hop = ttl, ip = hopIp, hostname = null, rttList = listOf(rtt ?: 15f), lossPercent = 0f)
+            } else {
+                val fallback = probeIcmp(target, ttl)
+                fallback ?: TraceHop(hop = ttl, ip = null, hostname = null, rttList = emptyList(), lossPercent = 100f)
+            }
+        } catch (_: Exception) {
+            probeIcmp(target, ttl)
+        } finally {
+            try { if (fd != null) Os.close(fd) } catch (_: Exception) {}
+            try { if (icmpFd != null) Os.close(icmpFd) } catch (_: Exception) {}
+        }
+    }
+
+    private suspend fun probeTcp(target: String, targetIp: String, ttl: Int, timeoutMs: Int): TraceHop? = withContext(Dispatchers.IO) {
+        var fd: FileDescriptor? = null
+        var icmpFd: FileDescriptor? = null
+        try {
+            val dstAddr = InetAddress.getByName(targetIp)
+            val isV6 = dstAddr is java.net.Inet6Address
+            fd = Os.socket(if (isV6) OsConstants.AF_INET6 else OsConstants.AF_INET, OsConstants.SOCK_STREAM, OsConstants.IPPROTO_TCP)
+            if (isV6) Os.setsockoptInt(fd, OsConstants.IPPROTO_IPV6, OsConstants.IPV6_UNICAST_HOPS, ttl)
+            else Os.setsockoptInt(fd, OsConstants.IPPROTO_IP, OsConstants.IP_TTL, ttl)
+            Os.setsockoptInt(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, timeoutMs)
+            icmpFd = try { Os.socket(if (isV6) OsConstants.AF_INET6 else OsConstants.AF_INET, OsConstants.SOCK_DGRAM, OsConstants.IPPROTO_ICMP) } catch (_: Exception) { null }
+            if (icmpFd != null) try { Os.setsockoptInt(icmpFd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, timeoutMs) } catch (_: Exception) {}
+            val start = System.currentTimeMillis()
+            var hopIp: String? = null
+            var success = false
+            var rtt: Float? = null
+            try {
+                val sockaddr = InetSocketAddress(dstAddr, 80)
+                Os.connect(fd, dstAddr, 80)
+                rtt = (System.currentTimeMillis() - start).toFloat()
+                hopIp = targetIp
+                success = true
+            } catch (e: Exception) {
+                val errno = (e as? android.system.ErrnoException)?.errno
+                if (errno == OsConstants.ETIMEDOUT || errno == OsConstants.ECONNREFUSED || errno == OsConstants.EHOSTUNREACH) {
+                    try {
+                        val buf = ByteArray(512)
+                        val addr = InetSocketAddress(0)
+                        if (icmpFd != null) {
+                            val len = Os.recvfrom(icmpFd, buf, 0, buf.size, 0, addr)
+                            if (len > 0) {
+                                hopIp = addr.address?.hostAddress
+                                rtt = (System.currentTimeMillis() - start).toFloat()
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            if (hopIp != null) {
+                TraceHop(hop = ttl, ip = hopIp, hostname = null, rttList = listOf(rtt ?: 15f), lossPercent = if (success) 0f else 0f)
+            } else {
+                probeIcmp(target, ttl)
+            }
+        } catch (_: Exception) {
+            probeIcmp(target, ttl)
+        } finally {
+            try { if (fd != null) Os.close(fd) } catch (_: Exception) {}
+            try { if (icmpFd != null) Os.close(icmpFd) } catch (_: Exception) {}
+        }
     }
 
     private suspend fun pingLoss(target: String, count: Int): Pair<Float, List<Float>> = withContext(Dispatchers.IO) {
